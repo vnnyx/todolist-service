@@ -17,16 +17,20 @@ import (
 type ActivityControllerImpl struct {
 	activityUC activity.ActivityUC
 	cache      *redis.Client
+	lock       sync.Mutex
 }
 
 func NewActivityController(activityUC activity.ActivityUC, cache *redis.Client) ActivityController {
 	return &ActivityControllerImpl{
 		activityUC: activityUC,
 		cache:      cache,
+		lock:       sync.Mutex{},
 	}
 }
 
 func (controller *ActivityControllerImpl) InsertActivity(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var req web.ActivityCreateRequest
 	err := c.Bind(&req)
 	if err != nil {
@@ -45,6 +49,8 @@ func (controller *ActivityControllerImpl) InsertActivity(c echo.Context) error {
 }
 
 func (controller *ActivityControllerImpl) GetActivityByID(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var a *web.ActivityDTO
 	var wg sync.WaitGroup
 
@@ -95,6 +101,8 @@ func (controller *ActivityControllerImpl) GetActivityByID(c echo.Context) error 
 }
 
 func (controller *ActivityControllerImpl) GetAllActivity(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var a []*web.ActivityDTO
 	var wg sync.WaitGroup
 
@@ -140,6 +148,8 @@ func (controller *ActivityControllerImpl) GetAllActivity(c echo.Context) error {
 }
 
 func (controller *ActivityControllerImpl) UpdateActivity(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var req web.ActivityUpdateRequest
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -162,6 +172,8 @@ func (controller *ActivityControllerImpl) UpdateActivity(c echo.Context) error {
 }
 
 func (controller *ActivityControllerImpl) DeleteActivity(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		return err

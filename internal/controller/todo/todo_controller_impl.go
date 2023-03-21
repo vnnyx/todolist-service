@@ -17,16 +17,20 @@ import (
 type TodoControllerImpl struct {
 	todoUC todo.TodoUC
 	cache  *redis.Client
+	lock   sync.Mutex
 }
 
 func NewTodoController(todoUC todo.TodoUC, cache *redis.Client) TodoController {
 	return &TodoControllerImpl{
 		todoUC: todoUC,
 		cache:  cache,
+		lock:   sync.Mutex{},
 	}
 }
 
 func (controller *TodoControllerImpl) InsertTodo(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var req web.TodoCreateRequest
 	err := c.Bind(&req)
 	if err != nil {
@@ -46,6 +50,8 @@ func (controller *TodoControllerImpl) InsertTodo(c echo.Context) error {
 }
 
 func (controller *TodoControllerImpl) GetTodoByID(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var t *web.TodoDTO
 	var wg sync.WaitGroup
 
@@ -95,6 +101,8 @@ func (controller *TodoControllerImpl) GetTodoByID(c echo.Context) error {
 }
 
 func (controller *TodoControllerImpl) GetAllTodo(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var t []*web.TodoDTO
 	var wg sync.WaitGroup
 
@@ -140,6 +148,8 @@ func (controller *TodoControllerImpl) GetAllTodo(c echo.Context) error {
 }
 
 func (controller *TodoControllerImpl) UpdateTodo(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var req web.TodoUpdateRequest
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -162,6 +172,8 @@ func (controller *TodoControllerImpl) UpdateTodo(c echo.Context) error {
 }
 
 func (controller *TodoControllerImpl) DeleteTodo(c echo.Context) error {
+	controller.lock.Lock()
+	defer controller.lock.Unlock()
 	var req web.TodoDeleteRequest
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
