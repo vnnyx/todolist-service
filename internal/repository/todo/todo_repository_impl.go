@@ -22,7 +22,7 @@ func (repo *TodoRepositoryImpl) InsertTodo(todo entity.Todo) (*entity.Todo, erro
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "INSERT INTO todos(activity_group_id, title, is_active) VALUES(?,?,?)"
+	query := "INSERT INTO todos(activity_group_id, title, is_active, created_at, updated_at) VALUES(?,?,?,now(),now())"
 	args := []interface{}{
 		todo.ActivityGroupID,
 		todo.Title,
@@ -104,7 +104,7 @@ func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, erro
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "UPDATE todos SET title=?, priority=?, is_active=? WHERE todo_id=?"
+	query := "UPDATE todos SET title=?, priority=?, is_active=?, updated_at=now() WHERE todo_id=?"
 	args := []interface{}{
 		todo.Title,
 		todo.Priority,

@@ -7,13 +7,17 @@ import (
 )
 
 type Todo struct {
-	ID              int64
+	ID              int64 `gorm:"column:todo_id;primaryKey"`
 	ActivityGroupID int64
 	Title           string
-	IsActive        bool
-	Priority        string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	IsActive        bool      `gorm:"default:true"`
+	Priority        string    `gorm:"default:very-high"`
+	CreatedAt       time.Time `gorm:"not null"`
+	UpdatedAt       time.Time `gorm:"not null"`
+}
+
+func (Todo) TableName() string {
+	return "todos"
 }
 
 func (t Todo) ToDTO() *web.TodoDTO {

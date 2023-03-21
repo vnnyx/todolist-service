@@ -9,11 +9,12 @@ import (
 )
 
 func StarServer() {
+	RunMigration()
 	e := echo.New()
 	e.HTTPErrorHandler = exception.ErrorHandler
 	r := di.InitializeRoute(".env", e)
 	r.InitRoute()
-	err := e.Start(":3030")
+	err := e.Start(":3131")
 	if err != nil {
 		log.Fatalf("couldn't start server: %v", err)
 	}

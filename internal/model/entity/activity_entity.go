@@ -7,11 +7,15 @@ import (
 )
 
 type Activity struct {
-	ID        int64
+	ID        int64 `gorm:"column:activity_id;primaryKey"`
 	Title     string
 	Email     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt time.Time `gorm:"not null"`
+	UpdatedAt time.Time `gorm:"not null"`
+}
+
+func (Activity) TableName() string {
+	return "activities"
 }
 
 func (a Activity) ToDTO() *web.ActivityDTO {

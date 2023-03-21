@@ -4,8 +4,6 @@ COPY . .
 RUN apk add upx make
 RUN go mod tidy
 RUN apk --update add redis
-RUN go install -tags 'mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-RUN make migrate
 RUN go build \
     -ldflags "-s -w" \
     -o main
