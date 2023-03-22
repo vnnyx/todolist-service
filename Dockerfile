@@ -1,9 +1,8 @@
 FROM golang:1.20-alpine as builder
 WORKDIR /builder
 COPY . .
-RUN apk add upx make
+RUN apk add upx
 RUN go mod tidy
-RUN apk --update add redis
 RUN go build \
     -ldflags "-s -w" \
     -o main
