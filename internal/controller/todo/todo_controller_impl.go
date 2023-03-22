@@ -1,13 +1,13 @@
 package todo
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/patrickmn/go-cache"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/vnnyx/golang-todo-api/internal/model/web"
 	"github.com/vnnyx/golang-todo-api/internal/usecase/todo"
@@ -15,11 +15,11 @@ import (
 
 type TodoControllerImpl struct {
 	todoUC todo.TodoUC
-	cache  *redis.Client
+	cache  *cache.Cache
 	lock   sync.Mutex
 }
 
-func NewTodoController(todoUC todo.TodoUC, cache *redis.Client) TodoController {
+func NewTodoController(todoUC todo.TodoUC, cache *cache.Cache) TodoController {
 	return &TodoControllerImpl{
 		todoUC: todoUC,
 		cache:  cache,
@@ -53,7 +53,6 @@ func (controller *TodoControllerImpl) GetTodoByID(c *fiber.Ctx) error {
 	controller.lock.Lock()
 	defer controller.lock.Unlock()
 
-	var t *web.TodoDTO
 	var wg sync.WaitGroup
 
 	id, err := strconv.Atoi(c.Params("id"))
@@ -61,14 +60,9 @@ func (controller *TodoControllerImpl) GetTodoByID(c *fiber.Ctx) error {
 		return err
 	}
 
-	got, err := controller.cache.Get(c.Context(), fmt.Sprintf("todo-%v", id)).Result()
-	if err != nil {
+	data, found := controller.cache.Get(fmt.Sprintf("todo-%v", id))
+	if !found {
 		res, err := controller.todoUC.GetTodoByID(c.Context(), int64(id))
-		if err != nil {
-			return err
-		}
-
-		data, err := json.Marshal(res)
 		if err != nil {
 			return err
 		}
@@ -76,10 +70,7 @@ func (controller *TodoControllerImpl) GetTodoByID(c *fiber.Ctx) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = controller.cache.Set(c.Context(), fmt.Sprintf("todo-%v", id), data, time.Until(time.Now().Add(time.Second*5))).Err()
-			if err != nil {
-				return
-			}
+			controller.cache.Set(fmt.Sprintf("todo-%v", id), res, time.Until(time.Now().Add(time.Second*5)))
 		}()
 		wg.Wait()
 		return c.Status(fiber.StatusOK).JSON(web.WebResponse{
@@ -89,15 +80,10 @@ func (controller *TodoControllerImpl) GetTodoByID(c *fiber.Ctx) error {
 		})
 	}
 
-	err = json.Unmarshal([]byte(got), &t)
-	if err != nil {
-		return err
-	}
-
 	return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 		Status:  "Success",
 		Message: "Success",
-		Data:    t,
+		Data:    data,
 	})
 }
 
@@ -105,18 +91,12 @@ func (controller *TodoControllerImpl) GetAllTodo(c *fiber.Ctx) error {
 	controller.lock.Lock()
 	defer controller.lock.Unlock()
 
-	var t []*web.TodoDTO
 	var wg sync.WaitGroup
 
 	activityGroupID, _ := strconv.Atoi(c.Query("activity_group_id"))
-	got, err := controller.cache.Get(c.Context(), fmt.Sprintf("alltodo-%v", activityGroupID)).Result()
-	if err != nil {
+	data, found := controller.cache.Get(fmt.Sprintf("alltodo-%v", activityGroupID))
+	if !found {
 		res, err := controller.todoUC.GetAllTodo(c.Context(), int64(activityGroupID))
-		if err != nil {
-			return err
-		}
-
-		data, err := json.Marshal(res)
 		if err != nil {
 			return err
 		}
@@ -124,10 +104,7 @@ func (controller *TodoControllerImpl) GetAllTodo(c *fiber.Ctx) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = controller.cache.Set(c.Context(), fmt.Sprintf("alltodo-%v", activityGroupID), data, time.Until(time.Now().Add(time.Second*5))).Err()
-			if err != nil {
-				return
-			}
+			controller.cache.Set(fmt.Sprintf("alltodo-%v", activityGroupID), res, time.Until(time.Now().Add(time.Second*5)))
 		}()
 		wg.Wait()
 		return c.Status(fiber.StatusOK).JSON(web.WebResponse{
@@ -137,15 +114,10 @@ func (controller *TodoControllerImpl) GetAllTodo(c *fiber.Ctx) error {
 		})
 	}
 
-	err = json.Unmarshal([]byte(got), &t)
-	if err != nil {
-		return err
-	}
-
 	return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 		Status:  "Success",
 		Message: "Success",
-		Data:    t,
+		Data:    data,
 	})
 }
 

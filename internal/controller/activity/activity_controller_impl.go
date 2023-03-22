@@ -1,13 +1,13 @@
 package activity
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/patrickmn/go-cache"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/vnnyx/golang-todo-api/internal/model/web"
 	"github.com/vnnyx/golang-todo-api/internal/usecase/activity"
@@ -15,11 +15,11 @@ import (
 
 type ActivityControllerImpl struct {
 	activityUC activity.ActivityUC
-	cache      *redis.Client
+	cache      *cache.Cache
 	lock       sync.Mutex
 }
 
-func NewActivityController(activityUC activity.ActivityUC, cache *redis.Client) ActivityController {
+func NewActivityController(activityUC activity.ActivityUC, cache *cache.Cache) ActivityController {
 	return &ActivityControllerImpl{
 		activityUC: activityUC,
 		cache:      cache,
@@ -52,7 +52,6 @@ func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
 	controller.lock.Lock()
 	defer controller.lock.Unlock()
 
-	var a *web.ActivityDTO
 	var wg sync.WaitGroup
 
 	id, err := strconv.Atoi(c.Params("id"))
@@ -60,14 +59,9 @@ func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
 		return err
 	}
 
-	got, err := controller.cache.Get(c.Context(), fmt.Sprintf("activity-%v", id)).Result()
-	if err != nil {
+	data, found := controller.cache.Get(fmt.Sprintf("activity-%v", id))
+	if !found {
 		res, err := controller.activityUC.GetActivityByID(c.Context(), int64(id))
-		if err != nil {
-			return err
-		}
-
-		data, err := json.Marshal(res)
 		if err != nil {
 			return err
 		}
@@ -75,10 +69,7 @@ func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = controller.cache.Set(c.Context(), fmt.Sprintf("activity-%v", id), data, time.Until(time.Now().Add(time.Second*5))).Err()
-			if err != nil {
-				return
-			}
+			controller.cache.Set(fmt.Sprintf("activity-%v", id), res, time.Until(time.Now().Add(time.Second*5)))
 		}()
 		wg.Wait()
 
@@ -89,15 +80,10 @@ func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
 		})
 	}
 
-	err = json.Unmarshal([]byte(got), &a)
-	if err != nil {
-		return err
-	}
-
 	return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 		Status:  "Success",
 		Message: "Success",
-		Data:    a,
+		Data:    data,
 	})
 }
 
@@ -105,17 +91,11 @@ func (controller *ActivityControllerImpl) GetAllActivity(c *fiber.Ctx) error {
 	controller.lock.Lock()
 	defer controller.lock.Unlock()
 
-	var a []*web.ActivityDTO
 	var wg sync.WaitGroup
 
-	got, err := controller.cache.Get(c.Context(), "allactivity").Result()
-	if err != nil {
+	data, found := controller.cache.Get("allactivity")
+	if !found {
 		res, err := controller.activityUC.GetAllActivity(c.Context())
-		if err != nil {
-			return err
-		}
-
-		data, err := json.Marshal(res)
 		if err != nil {
 			return err
 		}
@@ -123,10 +103,7 @@ func (controller *ActivityControllerImpl) GetAllActivity(c *fiber.Ctx) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = controller.cache.Set(c.Context(), "allactivity", data, time.Until(time.Now().Add(time.Second*5))).Err()
-			if err != nil {
-				return
-			}
+			controller.cache.Set("allactivity", res, time.Until(time.Now().Add(time.Second*5)))
 		}()
 		wg.Wait()
 
@@ -137,15 +114,10 @@ func (controller *ActivityControllerImpl) GetAllActivity(c *fiber.Ctx) error {
 		})
 	}
 
-	err = json.Unmarshal([]byte(got), &a)
-	if err != nil {
-		return err
-	}
-
 	return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 		Status:  "Success",
 		Message: "Success",
-		Data:    a,
+		Data:    data,
 	})
 }
 

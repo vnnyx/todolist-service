@@ -8,6 +8,7 @@ package di
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/patrickmn/go-cache"
 	activity3 "github.com/vnnyx/golang-todo-api/internal/controller/activity"
 	todo3 "github.com/vnnyx/golang-todo-api/internal/controller/todo"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
@@ -20,16 +21,15 @@ import (
 
 // Injectors from injector.go:
 
-func InitializeRoute(configName string, e *fiber.App) *routes.Route {
+func InitializeRoute(configName string, e *fiber.App, c *cache.Cache) *routes.Route {
 	config := infrastructure.NewConfig(configName)
 	db := infrastructure.NewMySQLDatabase(config)
 	activityRepository := activity.NewActivityRepository(db)
 	activityUC := activity2.NewActivityUC(activityRepository)
-	client := infrastructure.NewRedisClient(configName)
-	activityController := activity3.NewActivityController(activityUC, client)
+	activityController := activity3.NewActivityController(activityUC, c)
 	todoRepository := todo.NewTodoRepository(db)
 	todoUC := todo2.NewTodoUC(todoRepository)
-	todoController := todo3.NewTodoController(todoUC, client)
+	todoController := todo3.NewTodoController(todoUC, c)
 	route := routes.NewRoute(activityController, todoController, e)
 	return route
 }
