@@ -20,7 +20,7 @@ func (repo *ActivityRepositoryImpl) InsertActivity(activity entity.Activity) (*e
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "INSERT INTO activities(title, email, created_at, updated_at) VALUES(?,?,now(),now())"
+	query := "INSERT INTO activities(title, email) VALUES(?,?)"
 
 	args := []interface{}{
 		activity.Title,
@@ -92,7 +92,7 @@ func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*e
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "UPDATE activities SET title=?, updated_at=now() WHERE activity_id=?"
+	query := "UPDATE activities SET title=? WHERE activity_id=?"
 	args := []interface{}{
 		activity.Title,
 		activity.ID,

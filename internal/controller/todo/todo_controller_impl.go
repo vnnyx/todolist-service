@@ -16,21 +16,16 @@ import (
 type TodoControllerImpl struct {
 	todoUC todo.TodoUC
 	cache  *cache.Cache
-	lock   sync.Mutex
 }
 
 func NewTodoController(todoUC todo.TodoUC, cache *cache.Cache) TodoController {
 	return &TodoControllerImpl{
 		todoUC: todoUC,
 		cache:  cache,
-		lock:   sync.Mutex{},
 	}
 }
 
 func (controller *TodoControllerImpl) InsertTodo(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var req web.TodoCreateRequest
 	err := c.BodyParser(&req)
 	if err != nil {
@@ -50,9 +45,6 @@ func (controller *TodoControllerImpl) InsertTodo(c *fiber.Ctx) error {
 }
 
 func (controller *TodoControllerImpl) GetTodoByID(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var wg sync.WaitGroup
 
 	id, err := strconv.Atoi(c.Params("id"))
@@ -88,9 +80,6 @@ func (controller *TodoControllerImpl) GetTodoByID(c *fiber.Ctx) error {
 }
 
 func (controller *TodoControllerImpl) GetAllTodo(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var wg sync.WaitGroup
 
 	activityGroupID, _ := strconv.Atoi(c.Query("activity_group_id"))
@@ -122,9 +111,6 @@ func (controller *TodoControllerImpl) GetAllTodo(c *fiber.Ctx) error {
 }
 
 func (controller *TodoControllerImpl) UpdateTodo(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var req web.TodoUpdateRequest
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -147,9 +133,6 @@ func (controller *TodoControllerImpl) UpdateTodo(c *fiber.Ctx) error {
 }
 
 func (controller *TodoControllerImpl) DeleteTodo(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return err

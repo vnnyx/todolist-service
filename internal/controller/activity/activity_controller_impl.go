@@ -16,21 +16,16 @@ import (
 type ActivityControllerImpl struct {
 	activityUC activity.ActivityUC
 	cache      *cache.Cache
-	lock       sync.Mutex
 }
 
 func NewActivityController(activityUC activity.ActivityUC, cache *cache.Cache) ActivityController {
 	return &ActivityControllerImpl{
 		activityUC: activityUC,
 		cache:      cache,
-		lock:       sync.Mutex{},
 	}
 }
 
 func (controller *ActivityControllerImpl) InsertActivity(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var req web.ActivityCreateRequest
 	err := c.BodyParser(&req)
 	if err != nil {
@@ -49,9 +44,6 @@ func (controller *ActivityControllerImpl) InsertActivity(c *fiber.Ctx) error {
 }
 
 func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var wg sync.WaitGroup
 
 	id, err := strconv.Atoi(c.Params("id"))
@@ -88,9 +80,6 @@ func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
 }
 
 func (controller *ActivityControllerImpl) GetAllActivity(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var wg sync.WaitGroup
 
 	data, found := controller.cache.Get("allactivity")
@@ -122,9 +111,6 @@ func (controller *ActivityControllerImpl) GetAllActivity(c *fiber.Ctx) error {
 }
 
 func (controller *ActivityControllerImpl) UpdateActivity(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	var req web.ActivityUpdateRequest
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
@@ -147,9 +133,6 @@ func (controller *ActivityControllerImpl) UpdateActivity(c *fiber.Ctx) error {
 }
 
 func (controller *ActivityControllerImpl) DeleteActivity(c *fiber.Ctx) error {
-	controller.lock.Lock()
-	defer controller.lock.Unlock()
-
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return err

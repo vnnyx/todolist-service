@@ -6,19 +6,17 @@ import (
 )
 
 type Config struct {
-	AppPort                string `mapstructure:"APP_PORT"`
 	MysqlPoolMin           int    `mapstructure:"MYSQL_POOL_MIN"`
 	MysqlPoolMax           int    `mapstructure:"MYSQL_POOL_MAX"`
 	MysqlIdleMax           int    `mapstructure:"MYSQL_IDLE_MAX"`
 	MysqlMaxIdleTimeMinute int    `mapstructure:"MYSQL_MAX_IDLE_TIME_MINUTE"`
 	MysqlMaxLifeTimeMinute int    `mapstructure:"MYSQL_MAX_LIFE_TIME_MINUTE"`
-	RedisHost              string `mapstructure:"REDIS_HOST"`
-	RedisPassword          string `mapstructure:"REDIS_PASSWORD"`
 	MysqlHost              string `mapstructure:"MYSQL_HOST"`
 	MysqlPort              int    `mapstructure:"MYSQL_PORT"`
 	MysqlUser              string `mapstructure:"MYSQL_USER"`
 	MysqlPassword          string `mapstructure:"MYSQL_PASSWORD"`
 	MysqlDBName            string `mapstructure:"MYSQL_DBNAME"`
+	MigrationSource        string `mapstructure:"MIGRATION_SOURCE"`
 }
 
 func NewConfig(configName string) *Config {

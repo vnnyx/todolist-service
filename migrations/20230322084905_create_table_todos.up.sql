@@ -1,0 +1,9 @@
+CREATE TABLE todos(
+    todo_id int NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    activity_group_id int NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    is_active boolean NOT NULL DEFAULT true,
+    priority VARCHAR(255) NOT NULL DEFAULT "very-high",
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)ENGINE = InnoDB;
