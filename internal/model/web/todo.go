@@ -25,8 +25,3 @@ type TodoUpdateRequest struct {
 	IsActive *bool  `json:"is_active"`
 	Status   string `json:"status"`
 }
-
-type TodoDeleteRequest struct {
-	ID    int64
-	Title string `json:"title"`
-}

@@ -1,11 +1,13 @@
 package todo
 
-import "github.com/labstack/echo/v4"
+import (
+	"github.com/gofiber/fiber/v2"
+)
 
 type TodoController interface {
-	InsertTodo(c echo.Context) error
-	GetTodoByID(c echo.Context) error
-	GetAllTodo(c echo.Context) error
-	UpdateTodo(c echo.Context) error
-	DeleteTodo(c echo.Context) error
+	InsertTodo(c *fiber.Ctx) error
+	GetTodoByID(c *fiber.Ctx) error
+	GetAllTodo(c *fiber.Ctx) error
+	UpdateTodo(c *fiber.Ctx) error
+	DeleteTodo(c *fiber.Ctx) error
 }

@@ -24,5 +24,8 @@ func RunMigration() {
 		logrus.Fatal(err)
 	}
 
-	db.AutoMigrate(&entity.Activity{}, &entity.Todo{})
+	err = db.AutoMigrate(&entity.Activity{}, &entity.Todo{})
+	if err != nil {
+		logrus.Fatal(err)
+	}
 }

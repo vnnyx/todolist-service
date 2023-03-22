@@ -7,7 +7,7 @@
 package di
 
 import (
-	"github.com/labstack/echo/v4"
+	"github.com/gofiber/fiber/v2"
 	activity3 "github.com/vnnyx/golang-todo-api/internal/controller/activity"
 	todo3 "github.com/vnnyx/golang-todo-api/internal/controller/todo"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
@@ -20,7 +20,7 @@ import (
 
 // Injectors from injector.go:
 
-func InitializeRoute(configName string, e *echo.Echo) *routes.Route {
+func InitializeRoute(configName string, e *fiber.App) *routes.Route {
 	config := infrastructure.NewConfig(configName)
 	db := infrastructure.NewMySQLDatabase(config)
 	activityRepository := activity.NewActivityRepository(db)

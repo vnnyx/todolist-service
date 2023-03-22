@@ -11,5 +11,5 @@ type TodoUC interface {
 	GetTodoByID(ctx context.Context, id int64) (*web.TodoDTO, error)
 	GetAllTodo(ctx context.Context, activityGroupID int64) ([]*web.TodoDTO, error)
 	UpdateTodo(ctx context.Context, req web.TodoUpdateRequest) (*web.TodoDTO, error)
-	DeleteTodo(ctx context.Context, req web.TodoDeleteRequest) error
+	DeleteTodo(ctx context.Context, id int64) error
 }

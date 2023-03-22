@@ -96,8 +96,8 @@ func (uc *TodoUCImpl) UpdateTodo(ctx context.Context, req web.TodoUpdateRequest)
 	return got.ToDTO(), nil
 }
 
-func (uc *TodoUCImpl) DeleteTodo(ctx context.Context, req web.TodoDeleteRequest) error {
-	todo, err := uc.todoRepository.GetTodoByID(req.ID)
+func (uc *TodoUCImpl) DeleteTodo(ctx context.Context, id int64) error {
+	todo, err := uc.todoRepository.GetTodoByID(id)
 	if err != nil {
 		return err
 	}

@@ -1,11 +1,13 @@
 package activity
 
-import "github.com/labstack/echo/v4"
+import (
+	"github.com/gofiber/fiber/v2"
+)
 
 type ActivityController interface {
-	InsertActivity(c echo.Context) error
-	GetActivityByID(c echo.Context) error
-	GetAllActivity(c echo.Context) error
-	UpdateActivity(c echo.Context) error
-	DeleteActivity(c echo.Context) error
+	InsertActivity(c *fiber.Ctx) error
+	GetActivityByID(c *fiber.Ctx) error
+	GetAllActivity(c *fiber.Ctx) error
+	UpdateActivity(c *fiber.Ctx) error
+	DeleteActivity(c *fiber.Ctx) error
 }
