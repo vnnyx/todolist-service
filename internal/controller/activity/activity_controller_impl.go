@@ -4,24 +4,25 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
-	"time"
-
-	"github.com/patrickmn/go-cache"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/vnnyx/golang-todo-api/internal/controller"
 	"github.com/vnnyx/golang-todo-api/internal/model/web"
 	"github.com/vnnyx/golang-todo-api/internal/usecase/activity"
 )
 
 type ActivityControllerImpl struct {
 	activityUC activity.ActivityUC
-	cache      *cache.Cache
+	cache      *controller.LocalCache
 }
 
-func NewActivityController(activityUC activity.ActivityUC, cache *cache.Cache) ActivityController {
+func NewActivityController(activityUC activity.ActivityUC) ActivityController {
 	return &ActivityControllerImpl{
 		activityUC: activityUC,
-		cache:      cache,
+		cache: &controller.LocalCache{
+			Cache: make(map[string]interface{}),
+			Mu:    sync.Mutex{},
+		},
 	}
 }
 
@@ -36,6 +37,12 @@ func (controller *ActivityControllerImpl) InsertActivity(c *fiber.Ctx) error {
 		return err
 	}
 
+	go func() {
+		controller.cache.Mu.Lock()
+		controller.cache.Cache = make(map[string]interface{})
+		controller.cache.Mu.Unlock()
+	}()
+
 	return c.Status(fiber.StatusCreated).JSON(web.WebResponse{
 		Status:  "Success",
 		Message: "Success",
@@ -44,26 +51,25 @@ func (controller *ActivityControllerImpl) InsertActivity(c *fiber.Ctx) error {
 }
 
 func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
-	var wg sync.WaitGroup
-
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return err
 	}
 
-	data, found := controller.cache.Get(fmt.Sprintf("activity-%v", id))
+	controller.cache.Mu.Lock()
+	data, found := controller.cache.Cache[fmt.Sprintf("activityId-%v", id)]
+	controller.cache.Mu.Unlock()
 	if !found {
 		res, err := controller.activityUC.GetActivityByID(c.Context(), int64(id))
 		if err != nil {
 			return err
 		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			controller.cache.Set(fmt.Sprintf("activity-%v", id), res, time.Until(time.Now().Add(time.Second*5)))
-		}()
-		wg.Wait()
+		go func(res *web.ActivityDTO) {
+			controller.cache.Mu.Lock()
+			controller.cache.Cache[fmt.Sprintf("activityId-%v", id)] = res
+			controller.cache.Mu.Unlock()
+		}(res)
 
 		return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 			Status:  "Success",
@@ -80,21 +86,20 @@ func (controller *ActivityControllerImpl) GetActivityByID(c *fiber.Ctx) error {
 }
 
 func (controller *ActivityControllerImpl) GetAllActivity(c *fiber.Ctx) error {
-	var wg sync.WaitGroup
-
-	data, found := controller.cache.Get("allactivity")
+	controller.cache.Mu.Lock()
+	data, found := controller.cache.Cache["allactivity"]
+	controller.cache.Mu.Unlock()
 	if !found {
 		res, err := controller.activityUC.GetAllActivity(c.Context())
 		if err != nil {
 			return err
 		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			controller.cache.Set("allactivity", res, time.Until(time.Now().Add(time.Second*5)))
-		}()
-		wg.Wait()
+		go func(res []*web.ActivityDTO) {
+			controller.cache.Mu.Lock()
+			controller.cache.Cache["allactivity"] = res
+			controller.cache.Mu.Unlock()
+		}(res)
 
 		return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 			Status:  "Success",
@@ -125,6 +130,13 @@ func (controller *ActivityControllerImpl) UpdateActivity(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	go func() {
+		controller.cache.Mu.Lock()
+		controller.cache.Cache = make(map[string]interface{})
+		controller.cache.Mu.Unlock()
+	}()
+
 	return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 		Status:  "Success",
 		Message: "Success",
@@ -141,6 +153,12 @@ func (controller *ActivityControllerImpl) DeleteActivity(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+
+	go func() {
+		controller.cache.Mu.Lock()
+		controller.cache.Cache = make(map[string]interface{})
+		controller.cache.Mu.Unlock()
+	}()
 
 	return c.Status(fiber.StatusOK).JSON(web.WebResponse{
 		Status:  "Success",
