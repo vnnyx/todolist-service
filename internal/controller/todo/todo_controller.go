@@ -2,6 +2,7 @@ package todo
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/vnnyx/golang-todo-api/internal/usecase/todo"
 )
 
 type TodoController interface {
@@ -10,4 +11,7 @@ type TodoController interface {
 	GetAllTodo(c *fiber.Ctx) error
 	UpdateTodo(c *fiber.Ctx) error
 	DeleteTodo(c *fiber.Ctx) error
+
+	//dependency injection
+	InjectTodoUC(todoUC todo.TodoUC) error
 }

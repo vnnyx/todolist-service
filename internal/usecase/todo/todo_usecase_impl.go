@@ -14,10 +14,13 @@ type TodoUCImpl struct {
 	todoRepository todo.TodoRepository
 }
 
-func NewTodoUC(todoRepository todo.TodoRepository) TodoUC {
-	return &TodoUCImpl{
-		todoRepository: todoRepository,
-	}
+func NewTodoUC() TodoUC {
+	return &TodoUCImpl{}
+}
+
+func (uc *TodoUCImpl) InjectTodoRepository(todoRepository todo.TodoRepository) error {
+	uc.todoRepository = todoRepository
+	return nil
 }
 
 func (uc *TodoUCImpl) CreateTodo(ctx context.Context, req web.TodoCreateRequest) (*web.TodoDTO, error) {
@@ -34,6 +37,7 @@ func (uc *TodoUCImpl) CreateTodo(ctx context.Context, req web.TodoCreateRequest)
 	got, err := uc.todoRepository.InsertTodo(entity.Todo{
 		ActivityGroupID: req.ActivityGroupID,
 		Title:           req.Title,
+		Priority:        "very-high",
 		IsActive:        isActive,
 	})
 	if err != nil {

@@ -6,16 +6,16 @@ import (
 	"github.com/vnnyx/golang-todo-api/internal/model/web"
 )
 
+var (
+	ActivitySeq = int64(1)
+)
+
 type Activity struct {
-	ID        int64 `gorm:"column:activity_id;primaryKey"`
+	ID        int64
 	Title     string
 	Email     string
-	CreatedAt time.Time `gorm:"not null"`
-	UpdatedAt time.Time `gorm:"not null"`
-}
-
-func (Activity) TableName() string {
-	return "activities"
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (a Activity) ToDTO() *web.ActivityDTO {

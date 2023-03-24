@@ -1,15 +1,13 @@
 package web
 
-import "time"
-
 type TodoDTO struct {
-	ID              int64     `json:"id"`
-	Title           string    `json:"title"`
-	ActivityGroupID int64     `json:"activity_group_id"`
-	IsActive        bool      `json:"is_active"`
-	Priority        string    `json:"priority"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID              int64  `json:"id"`
+	Title           string `json:"title"`
+	ActivityGroupID int64  `json:"activity_group_id"`
+	IsActive        bool   `json:"is_active"`
+	Priority        string `json:"priority"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
 }
 
 type TodoCreateRequest struct {

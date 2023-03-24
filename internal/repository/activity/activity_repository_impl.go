@@ -1,8 +1,10 @@
 package activity
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
@@ -10,45 +12,59 @@ import (
 )
 
 type ActivityRepositoryImpl struct {
-	db    *sql.DB
-	cache *cache.Cache
+	db             *sql.DB
+	cache          *cache.Cache
+	workerActivity chan entity.Activity
 }
 
-func NewActivityRepository(db *sql.DB, cache *cache.Cache) ActivityRepository {
+func NewActivityRepository() ActivityRepository {
 	return &ActivityRepositoryImpl{
-		db:    db,
-		cache: cache,
+		workerActivity: make(chan entity.Activity),
+	}
+}
+
+func (repo *ActivityRepositoryImpl) InjectDB(db *sql.DB) error {
+	repo.db = db
+	return nil
+}
+
+func (repo *ActivityRepositoryImpl) InjectCache(cache *cache.Cache) error {
+	repo.cache = cache
+	return nil
+}
+
+func (repo *ActivityRepositoryImpl) Worker() {
+	for {
+		activity := <-repo.workerActivity
+		query := "INSERT INTO activities(activity_id, title, email, created_at, updated_at) VALUES(?,?,?,?,?)"
+
+		args := []interface{}{
+			activity.ID,
+			activity.Title,
+			activity.Email,
+			activity.CreatedAt,
+			activity.UpdatedAt,
+		}
+		_, err := repo.db.ExecContext(context.Background(), query, args...)
+		if err != nil {
+			return
+		}
 	}
 }
 
 func (repo *ActivityRepositoryImpl) InsertActivity(activity entity.Activity) (*entity.Activity, error) {
 	repo.cache.Flush()
 
-	ctx, cancel := infrastructure.NewMySQLContext()
-	defer cancel()
+	activity.CreatedAt = time.Now()
+	activity.UpdatedAt = time.Now()
+	activity.ID = entity.ActivitySeq
+	entity.ActivitySeq++
 
-	query := "INSERT INTO activities(title, email) VALUES(?,?)"
+	go func(activity entity.Activity) {
+		repo.workerActivity <- activity
+	}(activity)
 
-	args := []interface{}{
-		activity.Title,
-		activity.Email,
-	}
-	result, err := repo.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	a, err := repo.GetActivityByID(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return a, nil
+	return &activity, nil
 }
 
 func (repo *ActivityRepositoryImpl) GetActivityByID(id int64) (activity *entity.Activity, err error) {

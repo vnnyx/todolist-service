@@ -1,8 +1,10 @@
 package todo
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
@@ -10,43 +12,60 @@ import (
 )
 
 type TodoRepositoryImpl struct {
-	db    *sql.DB
-	cache *cache.Cache
+	db         *sql.DB
+	cache      *cache.Cache
+	workerTodo chan entity.Todo
 }
 
-func NewTodoRepository(db *sql.DB, cache *cache.Cache) TodoRepository {
+func NewTodoRepository() TodoRepository {
 	return &TodoRepositoryImpl{
-		db:    db,
-		cache: cache,
+		workerTodo: make(chan entity.Todo),
+	}
+}
+
+func (repo *TodoRepositoryImpl) InjectDB(db *sql.DB) error {
+	repo.db = db
+	return nil
+}
+
+func (repo *TodoRepositoryImpl) InjectCache(cache *cache.Cache) error {
+	repo.cache = cache
+	return nil
+}
+
+func (repo *TodoRepositoryImpl) Worker() {
+	for {
+		todo := <-repo.workerTodo
+		query := "INSERT INTO todos(todo_id, activity_group_id, title, is_active, priority, created_at, updated_at) VALUES(?,?,?,?,?,?,?)"
+		args := []interface{}{
+			todo.ID,
+			todo.ActivityGroupID,
+			todo.Title,
+			todo.IsActive,
+			todo.Priority,
+			todo.CreatedAt,
+			todo.UpdatedAt,
+		}
+		_, err := repo.db.ExecContext(context.Background(), query, args...)
+		if err != nil {
+			return
+		}
 	}
 }
 
 func (repo *TodoRepositoryImpl) InsertTodo(todo entity.Todo) (*entity.Todo, error) {
 	repo.cache.Flush()
 
-	ctx, cancel := infrastructure.NewMySQLContext()
-	defer cancel()
+	todo.CreatedAt = time.Now()
+	todo.UpdatedAt = time.Now()
+	todo.ID = entity.TodoSeq
+	entity.TodoSeq++
 
-	query := "INSERT INTO todos(activity_group_id, title, is_active) VALUES(?,?,?)"
-	args := []interface{}{
-		todo.ActivityGroupID,
-		todo.Title,
-		todo.IsActive,
-	}
-	result, err := repo.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
+	go func(todo entity.Todo) {
+		repo.workerTodo <- todo
+	}(todo)
 
-	t, err := repo.GetTodoByID(id)
-	if err != nil {
-		return nil, err
-	}
-	return t, nil
+	return &todo, nil
 }
 
 func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (todo *entity.Todo, err error) {

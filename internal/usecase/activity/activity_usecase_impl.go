@@ -14,8 +14,13 @@ type ActivityUCImpl struct {
 	activityRepository activity.ActivityRepository
 }
 
-func NewActivityUC(activityRepository activity.ActivityRepository) ActivityUC {
-	return &ActivityUCImpl{activityRepository: activityRepository}
+func NewActivityUC() ActivityUC {
+	return &ActivityUCImpl{}
+}
+
+func (uc *ActivityUCImpl) InjectActivityRepository(activityRepository activity.ActivityRepository) error {
+	uc.activityRepository = activityRepository
+	return nil
 }
 
 func (uc *ActivityUCImpl) CreateActivity(ctx context.Context, req web.ActivityCreateRequest) (*web.ActivityDTO, error) {

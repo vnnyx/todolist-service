@@ -16,14 +16,18 @@ type ActivityControllerImpl struct {
 	cache      *controller.LocalCache
 }
 
-func NewActivityController(activityUC activity.ActivityUC) ActivityController {
+func NewActivityController() ActivityController {
 	return &ActivityControllerImpl{
-		activityUC: activityUC,
 		cache: &controller.LocalCache{
 			Cache: make(map[string]interface{}),
 			Mu:    sync.Mutex{},
 		},
 	}
+}
+
+func (controller *ActivityControllerImpl) InjectActivityUC(activityUC activity.ActivityUC) error {
+	controller.activityUC = activityUC
+	return nil
 }
 
 func (controller *ActivityControllerImpl) InsertActivity(c *fiber.Ctx) error {

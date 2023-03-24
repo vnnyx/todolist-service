@@ -6,18 +6,18 @@ import (
 	"github.com/vnnyx/golang-todo-api/internal/model/web"
 )
 
+var (
+	TodoSeq = int64(1)
+)
+
 type Todo struct {
-	ID              int64 `gorm:"column:todo_id;primaryKey"`
+	ID              int64
 	ActivityGroupID int64
 	Title           string
-	IsActive        bool      `gorm:"default:true"`
-	Priority        string    `gorm:"default:very-high"`
-	CreatedAt       time.Time `gorm:"not null"`
-	UpdatedAt       time.Time `gorm:"not null"`
-}
-
-func (Todo) TableName() string {
-	return "todos"
+	IsActive        bool
+	Priority        string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (t Todo) ToDTO() *web.TodoDTO {
@@ -27,7 +27,7 @@ func (t Todo) ToDTO() *web.TodoDTO {
 		ActivityGroupID: t.ActivityGroupID,
 		IsActive:        t.IsActive,
 		Priority:        t.Priority,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
+		CreatedAt:       t.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       t.UpdatedAt.Format(time.RFC3339),
 	}
 }

@@ -16,14 +16,18 @@ type TodoControllerImpl struct {
 	cache  *controller.LocalCache
 }
 
-func NewTodoController(todoUC todo.TodoUC) TodoController {
+func NewTodoController() TodoController {
 	return &TodoControllerImpl{
-		todoUC: todoUC,
 		cache: &controller.LocalCache{
 			Cache: make(map[string]interface{}),
 			Mu:    sync.Mutex{},
 		},
 	}
+}
+
+func (controller *TodoControllerImpl) InjectTodoUC(todoUC todo.TodoUC) error {
+	controller.todoUC = todoUC
+	return nil
 }
 
 func (controller *TodoControllerImpl) InsertTodo(c *fiber.Ctx) error {
