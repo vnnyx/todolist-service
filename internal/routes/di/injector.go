@@ -21,6 +21,7 @@ func InitializeRoute(configName string, e *fiber.App, c *cache.Cache) *routes.Ro
 	wire.Build(
 		infrastructure.NewConfig,
 		infrastructure.NewMySQLDatabase,
+		infrastructure.NewMemDB,
 		activityRepo.NewActivityRepository,
 		todoRepo.NewTodoRepository,
 		activityUC.NewActivityUC,

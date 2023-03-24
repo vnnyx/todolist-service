@@ -7,11 +7,11 @@ import (
 )
 
 type Activity struct {
-	ID        int64 `gorm:"column:activity_id;primaryKey"`
+	ID        int64
 	Title     string
 	Email     string
-	CreatedAt time.Time `gorm:"not null"`
-	UpdatedAt time.Time `gorm:"not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (Activity) TableName() string {
