@@ -24,10 +24,10 @@ import (
 func InitializeRoute(configName string, e *fiber.App, c *cache.Cache) *routes.Route {
 	config := infrastructure.NewConfig(configName)
 	db := infrastructure.NewMySQLDatabase(config)
-	activityRepository := activity.NewActivityRepository(db)
+	activityRepository := activity.NewActivityRepository(db, c)
 	activityUC := activity2.NewActivityUC(activityRepository)
 	activityController := activity3.NewActivityController(activityUC, c)
-	todoRepository := todo.NewTodoRepository(db)
+	todoRepository := todo.NewTodoRepository(db, c)
 	todoUC := todo2.NewTodoUC(todoRepository)
 	todoController := todo3.NewTodoController(todoUC, c)
 	route := routes.NewRoute(activityController, todoController, e)

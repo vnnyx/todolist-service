@@ -4,21 +4,26 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
 	"github.com/vnnyx/golang-todo-api/internal/model/entity"
 )
 
 type TodoRepositoryImpl struct {
-	db *sql.DB
+	db    *sql.DB
+	cache *cache.Cache
 }
 
-func NewTodoRepository(db *sql.DB) TodoRepository {
+func NewTodoRepository(db *sql.DB, cache *cache.Cache) TodoRepository {
 	return &TodoRepositoryImpl{
-		db: db,
+		db:    db,
+		cache: cache,
 	}
 }
 
 func (repo *TodoRepositoryImpl) InsertTodo(todo entity.Todo) (*entity.Todo, error) {
+	repo.cache.Flush()
+
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
@@ -48,22 +53,27 @@ func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (todo *entity.Todo, err er
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "SELECT * FROM todos WHERE todo_id=?"
-	rows, err := repo.db.QueryContext(ctx, query, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var t entity.Todo
-		err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
+	data, found := repo.cache.Get(fmt.Sprintf("todoId-%v", id))
+	if !found {
+		query := "SELECT * FROM todos WHERE todo_id=?"
+		rows, err := repo.db.QueryContext(ctx, query, id)
 		if err != nil {
 			return nil, err
 		}
-		return &t, nil
+		defer rows.Close()
+
+		if rows.Next() {
+			var t = new(entity.Todo)
+			err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
+			if err != nil {
+				return nil, err
+			}
+			repo.cache.SetDefault(fmt.Sprintf("todoId-%v", id), t)
+			return t, nil
+		}
+		return nil, fmt.Errorf("Todo with ID %v Not Found", id)
 	}
-	return nil, fmt.Errorf("Todo with ID %v Not Found", id)
+	return data.(*entity.Todo), nil
 }
 
 func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) (todos []*entity.Todo, err error) {
@@ -72,35 +82,37 @@ func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) (todos []*enti
 
 	var rows *sql.Rows
 
-	switch {
-	case activityGroupID != 0:
-		query := "SELECT * FROM todos WHERE activity_group_id=?"
-		rows, err = repo.db.QueryContext(ctx, query, activityGroupID)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-	default:
+	data, found := repo.cache.Get(fmt.Sprintf("alltodo-%v", activityGroupID))
+	if !found {
 		query := "SELECT * FROM todos"
+		if activityGroupID != 0 {
+			query = fmt.Sprintf("%s %s '%d'", query, " where activity_group_id = ", activityGroupID)
+		}
+
 		rows, err = repo.db.QueryContext(ctx, query)
 		if err != nil {
 			return nil, err
 		}
 		defer rows.Close()
+
+		for rows.Next() {
+			var t = new(entity.Todo)
+			err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
+			if err != nil {
+				return nil, err
+			}
+			todos = append(todos, t)
+		}
+		repo.cache.SetDefault(fmt.Sprintf("alltodo-%v", activityGroupID), todos)
+		return todos, nil
 	}
 
-	for rows.Next() {
-		var t entity.Todo
-		err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		todos = append(todos, &t)
-	}
-	return todos, nil
+	return data.([]*entity.Todo), nil
 }
 
 func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, error) {
+	repo.cache.Flush()
+
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
@@ -124,6 +136,8 @@ func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, erro
 }
 
 func (repo *TodoRepositoryImpl) DeleteTodo(id int64, title string) error {
+	repo.cache.Flush()
+
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 

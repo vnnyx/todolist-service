@@ -4,19 +4,26 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
 	"github.com/vnnyx/golang-todo-api/internal/model/entity"
 )
 
 type ActivityRepositoryImpl struct {
-	db *sql.DB
+	db    *sql.DB
+	cache *cache.Cache
 }
 
-func NewActivityRepository(db *sql.DB) ActivityRepository {
-	return &ActivityRepositoryImpl{db: db}
+func NewActivityRepository(db *sql.DB, cache *cache.Cache) ActivityRepository {
+	return &ActivityRepositoryImpl{
+		db:    db,
+		cache: cache,
+	}
 }
 
 func (repo *ActivityRepositoryImpl) InsertActivity(activity entity.Activity) (*entity.Activity, error) {
+	repo.cache.Flush()
+
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
@@ -48,47 +55,60 @@ func (repo *ActivityRepositoryImpl) GetActivityByID(id int64) (activity *entity.
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "SELECT * FROM activities WHERE activity_id=?"
-	rows, err := repo.db.QueryContext(ctx, query, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var a entity.Activity
-		err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
+	data, found := repo.cache.Get(fmt.Sprintf("activityId-%v", id))
+	if !found {
+		query := "SELECT * FROM activities WHERE activity_id=?"
+		rows, err := repo.db.QueryContext(ctx, query, id)
 		if err != nil {
 			return nil, err
 		}
-		return &a, nil
+		defer rows.Close()
+
+		if rows.Next() {
+			var a = new(entity.Activity)
+			err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
+			if err != nil {
+				return nil, err
+			}
+			repo.cache.SetDefault(fmt.Sprintf("activityId-%v", id), a)
+			return a, nil
+		}
+		return nil, fmt.Errorf("Activity with ID %v Not Found", id)
 	}
-	return nil, fmt.Errorf("Activity with ID %v Not Found", id)
+
+	return data.(*entity.Activity), nil
 }
 
 func (repo *ActivityRepositoryImpl) GetAllActivity() (activities []*entity.Activity, err error) {
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "SELECT * FROM activities"
-	rows, err := repo.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var a entity.Activity
-		err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
+	data, found := repo.cache.Get("allactivity")
+	if !found {
+		query := "SELECT * FROM activities"
+		rows, err := repo.db.QueryContext(ctx, query)
 		if err != nil {
 			return nil, err
 		}
-		activities = append(activities, &a)
+		defer rows.Close()
+
+		for rows.Next() {
+			var a = new(entity.Activity)
+			err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
+			if err != nil {
+				return nil, err
+			}
+			activities = append(activities, a)
+		}
+		repo.cache.SetDefault("allactivity", activities)
+		return activities, nil
 	}
-	return activities, nil
+	return data.([]*entity.Activity), nil
 }
 
 func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*entity.Activity, error) {
+	repo.cache.Flush()
+
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
@@ -111,6 +131,8 @@ func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*e
 }
 
 func (repo *ActivityRepositoryImpl) DeleteActivity(id int64) error {
+	repo.cache.Flush()
+
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
