@@ -33,54 +33,54 @@ func StarServer() {
 	cfg := infrastructure.NewConfig(".env")
 	cache := cache.New(5*time.Minute, 10*time.Minute)
 	mysqlDB := infrastructure.NewMySQLDatabase(cfg)
+	memdb := infrastructure.NewMemDB()
 
 	activityRepo := activity.NewActivityRepository()
-	activityRepo.InjectDB(mysqlDB)
-	activityRepo.InjectCache(cache)
+	err := activityRepo.InjectDB(mysqlDB)
+	continueOrFatal(err)
+	err = activityRepo.InjectCache(cache)
+	continueOrFatal(err)
+	err = activityRepo.InjectMemDB(memdb)
+	continueOrFatal(err)
 
 	activityUC := activityUC.NewActivityUC()
-	activityUC.InjectActivityRepository(activityRepo)
+	err = activityUC.InjectActivityRepository(activityRepo)
+	continueOrFatal(err)
 
 	activityController := activityController.NewActivityController()
-	activityController.InjectActivityUC(activityUC)
+	err = activityController.InjectActivityUC(activityUC)
+	continueOrFatal(err)
 
 	todoRepo := todo.NewTodoRepository()
-	todoRepo.InjectDB(mysqlDB)
-	todoRepo.InjectCache(cache)
+	err = todoRepo.InjectDB(mysqlDB)
+	continueOrFatal(err)
+	err = todoRepo.InjectCache(cache)
+	continueOrFatal(err)
+	err = todoRepo.InjectMemDB(memdb)
+	continueOrFatal(err)
 
 	todoUC := todoUC.NewTodoUC()
-	todoUC.InjectTodoRepository(todoRepo)
+	err = todoUC.InjectTodoRepository(todoRepo)
+	continueOrFatal(err)
 
 	todoController := todoController.NewTodoController()
-	todoController.InjectTodoUC(todoUC)
+	err = todoController.InjectTodoUC(todoUC)
+	continueOrFatal(err)
 
-	quit := make(chan bool)
-	go func() {
-		for {
-			select {
-			case <-quit:
-				return
-			default:
-				todoRepo.Worker()
-			}
-		}
-	}()
-	go func() {
-		for {
-			select {
-			case <-quit:
-				return
-			default:
-				activityRepo.Worker()
-			}
-		}
-	}()
+	go activityRepo.Worker()
+	go todoRepo.Worker()
 
 	r := routes.NewRoute(activityController, todoController, app)
 	r.InitRoute()
 
-	err := app.Listen(":3030")
+	err = app.Listen(":3030")
 	if err != nil {
 		log.Fatalf("couldn't start server: %v", err)
+	}
+}
+
+func continueOrFatal(err error) {
+	if err != nil {
+		log.Fatal(err)
 	}
 }

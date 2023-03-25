@@ -3,6 +3,7 @@ package todo
 import (
 	"database/sql"
 
+	"github.com/hashicorp/go-memdb"
 	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/model/entity"
 )
@@ -17,5 +18,6 @@ type TodoRepository interface {
 
 	//dependency injection
 	InjectDB(db *sql.DB) error
+	InjectMemDB(memdb *memdb.MemDB) error
 	InjectCache(cache *cache.Cache) error
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
+	"github.com/hashicorp/go-memdb"
 	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
 	"github.com/vnnyx/golang-todo-api/internal/model/entity"
@@ -15,6 +17,7 @@ type ActivityRepositoryImpl struct {
 	db             *sql.DB
 	cache          *cache.Cache
 	workerActivity chan entity.Activity
+	memdb          *memdb.MemDB
 }
 
 func NewActivityRepository() ActivityRepository {
@@ -33,6 +36,11 @@ func (repo *ActivityRepositoryImpl) InjectCache(cache *cache.Cache) error {
 	return nil
 }
 
+func (repo *ActivityRepositoryImpl) InjectMemDB(memdb *memdb.MemDB) error {
+	repo.memdb = memdb
+	return nil
+}
+
 func (repo *ActivityRepositoryImpl) Worker() {
 	for {
 		activity := <-repo.workerActivity
@@ -45,20 +53,37 @@ func (repo *ActivityRepositoryImpl) Worker() {
 			activity.CreatedAt,
 			activity.UpdatedAt,
 		}
+
 		_, err := repo.db.ExecContext(context.Background(), query, args...)
 		if err != nil {
-			return
+			log.Printf("Error inserting activity %d to database: %v\n", activity.ID, err)
 		}
 	}
 }
 
 func (repo *ActivityRepositoryImpl) InsertActivity(activity entity.Activity) (*entity.Activity, error) {
-	repo.cache.Flush()
+	go func() {
+		repo.cache.Flush()
+	}()
 
 	activity.CreatedAt = time.Now()
 	activity.UpdatedAt = time.Now()
 	activity.ID = entity.ActivitySeq
 	entity.ActivitySeq++
+
+	query := "INSERT INTO activities(activity_id, title, email, created_at, updated_at) VALUES(?,?,?,?,?)"
+	args := []interface{}{
+		activity.ID,
+		activity.Title,
+		activity.Email,
+		activity.CreatedAt,
+		activity.UpdatedAt,
+	}
+
+	_, err := repo.db.ExecContext(context.Background(), query, args...)
+	if err != nil {
+		return nil, err
+	}
 
 	go func(activity entity.Activity) {
 		repo.workerActivity <- activity
@@ -123,7 +148,9 @@ func (repo *ActivityRepositoryImpl) GetAllActivity() (activities []*entity.Activ
 }
 
 func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*entity.Activity, error) {
-	repo.cache.Flush()
+	go func() {
+		repo.cache.Flush()
+	}()
 
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
@@ -147,7 +174,9 @@ func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*e
 }
 
 func (repo *ActivityRepositoryImpl) DeleteActivity(id int64) error {
-	repo.cache.Flush()
+	go func() {
+		repo.cache.Flush()
+	}()
 
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()

@@ -2,6 +2,7 @@ package activity
 
 import (
 	"context"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/vnnyx/golang-todo-api/internal/model"
@@ -27,6 +28,10 @@ func (uc *ActivityUCImpl) CreateActivity(ctx context.Context, req web.ActivityCr
 	if req.Title == "" {
 		return nil, model.ErrTitleCannotBeNull
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+
 	got, err := uc.activityRepository.InsertActivity(entity.Activity{
 		Title: req.Title,
 		Email: req.Email,

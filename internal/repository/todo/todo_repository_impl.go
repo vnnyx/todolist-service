@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/hashicorp/go-memdb"
 	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/infrastructure"
 	"github.com/vnnyx/golang-todo-api/internal/model/entity"
@@ -15,6 +17,7 @@ type TodoRepositoryImpl struct {
 	db         *sql.DB
 	cache      *cache.Cache
 	workerTodo chan entity.Todo
+	memdb      *memdb.MemDB
 }
 
 func NewTodoRepository() TodoRepository {
@@ -30,6 +33,11 @@ func (repo *TodoRepositoryImpl) InjectDB(db *sql.DB) error {
 
 func (repo *TodoRepositoryImpl) InjectCache(cache *cache.Cache) error {
 	repo.cache = cache
+	return nil
+}
+
+func (repo *TodoRepositoryImpl) InjectMemDB(memdb *memdb.MemDB) error {
+	repo.memdb = memdb
 	return nil
 }
 
@@ -54,16 +62,41 @@ func (repo *TodoRepositoryImpl) Worker() {
 }
 
 func (repo *TodoRepositoryImpl) InsertTodo(todo entity.Todo) (*entity.Todo, error) {
-	repo.cache.Flush()
+	go func() {
+		repo.cache.Flush()
+	}()
+
+	var wg sync.WaitGroup
 
 	todo.CreatedAt = time.Now()
 	todo.UpdatedAt = time.Now()
 	todo.ID = entity.TodoSeq
 	entity.TodoSeq++
 
+	wg.Add(1)
 	go func(todo entity.Todo) {
 		repo.workerTodo <- todo
 	}(todo)
+
+	go func(todo entity.Todo) {
+		defer wg.Done()
+		query := "INSERT INTO todos(todo_id, activity_group_id, title, is_active, priority, created_at, updated_at) VALUES(?,?,?,?,?,?,?)"
+		args := []interface{}{
+			todo.ID,
+			todo.ActivityGroupID,
+			todo.Title,
+			todo.IsActive,
+			todo.Priority,
+			todo.CreatedAt,
+			todo.UpdatedAt,
+		}
+		_, err := repo.db.ExecContext(context.Background(), query, args...)
+		if err != nil {
+			return
+		}
+	}(todo)
+
+	wg.Wait()
 
 	return &todo, nil
 }
@@ -130,7 +163,9 @@ func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) (todos []*enti
 }
 
 func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, error) {
-	repo.cache.Flush()
+	go func() {
+		repo.cache.Flush()
+	}()
 
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
@@ -155,7 +190,9 @@ func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, erro
 }
 
 func (repo *TodoRepositoryImpl) DeleteTodo(id int64, title string) error {
-	repo.cache.Flush()
+	go func() {
+		repo.cache.Flush()
+	}()
 
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
