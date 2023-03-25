@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,13 +18,19 @@ import (
 type TodoRepositoryImpl struct {
 	db         *sql.DB
 	cache      *cache.Cache
-	workerTodo chan entity.Todo
+	workerTodo chan *entity.Todo
 	memdb      *memdb.MemDB
+	mutex      sync.Mutex
+}
+
+type cacheKey struct {
+	key string
 }
 
 func NewTodoRepository() TodoRepository {
 	return &TodoRepositoryImpl{
-		workerTodo: make(chan entity.Todo),
+		workerTodo: make(chan *entity.Todo),
+		mutex:      sync.Mutex{},
 	}
 }
 
@@ -41,74 +49,100 @@ func (repo *TodoRepositoryImpl) InjectMemDB(memdb *memdb.MemDB) error {
 	return nil
 }
 
-func (repo *TodoRepositoryImpl) Worker() {
+func (repo *TodoRepositoryImpl) Worker(ctx context.Context) {
 	for {
-		todo := <-repo.workerTodo
 		query := "INSERT INTO todos(todo_id, activity_group_id, title, is_active, priority, created_at, updated_at) VALUES(?,?,?,?,?,?,?)"
-		args := []interface{}{
-			todo.ID,
-			todo.ActivityGroupID,
-			todo.Title,
-			todo.IsActive,
-			todo.Priority,
-			todo.CreatedAt,
-			todo.UpdatedAt,
-		}
-		_, err := repo.db.ExecContext(context.Background(), query, args...)
-		if err != nil {
-			return
+		select {
+		case <-ctx.Done():
+			return // exit if the context is cancelled
+		case todo := <-repo.workerTodo:
+			tx, err := repo.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+			if err != nil {
+				log.Fatalf("error starting transaction: %v", err)
+			}
+
+			args := []interface{}{
+				todo.ID,
+				todo.ActivityGroupID,
+				todo.Title,
+				todo.IsActive,
+				todo.Priority,
+				todo.CreatedAt,
+				todo.UpdatedAt,
+			}
+
+			// Use a context with timeout for the insert operation
+			insertCtx, insertCancel := context.WithTimeout(ctx, time.Second*10)
+			defer insertCancel()
+
+			stmt, err := tx.PrepareContext(ctx, query)
+			if err != nil {
+				// rollback the transaction if an error occurs
+				tx.Rollback()
+				return
+			}
+			defer stmt.Close()
+
+			_, err = stmt.ExecContext(insertCtx, args...)
+			if err != nil {
+				// rollback the transaction if an error occurs
+				tx.Rollback()
+				return
+			}
+			tx.Commit()
+
+			// insert the todo into the memdb
+			txn := repo.memdb.Txn(true)
+			defer txn.Abort()
+			err = txn.Insert("todos", todo)
+			if err != nil {
+				return
+			}
+			txn.Commit()
 		}
 	}
 }
 
-func (repo *TodoRepositoryImpl) InsertTodo(todo entity.Todo) (*entity.Todo, error) {
+func (repo *TodoRepositoryImpl) InsertTodo(todo *entity.Todo) error {
 	go func() {
 		repo.cache.Flush()
 	}()
-
-	var wg sync.WaitGroup
 
 	todo.CreatedAt = time.Now()
 	todo.UpdatedAt = time.Now()
 	todo.ID = entity.TodoSeq
 	entity.TodoSeq++
 
-	wg.Add(1)
-	go func(todo entity.Todo) {
-		repo.workerTodo <- todo
-	}(todo)
+	wg := sync.WaitGroup{}
 
-	go func(todo entity.Todo) {
-		defer wg.Done()
-		query := "INSERT INTO todos(todo_id, activity_group_id, title, is_active, priority, created_at, updated_at) VALUES(?,?,?,?,?,?,?)"
-		args := []interface{}{
-			todo.ID,
-			todo.ActivityGroupID,
-			todo.Title,
-			todo.IsActive,
-			todo.Priority,
-			todo.CreatedAt,
-			todo.UpdatedAt,
-		}
-		_, err := repo.db.ExecContext(context.Background(), query, args...)
-		if err != nil {
-			return
-		}
+	wg.Add(1)
+	go func(todo *entity.Todo) {
+		repo.workerTodo <- todo
+		wg.Done()
 	}(todo)
 
 	wg.Wait()
 
-	return &todo, nil
+	return nil
 }
 
 func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (todo *entity.Todo, err error) {
-	ctx, cancel := infrastructure.NewMySQLContext()
-	defer cancel()
-
-	data, found := repo.cache.Get(fmt.Sprintf("todoId-%v", id))
+	key := cacheKey{"todoId-" + strconv.FormatInt(id, 10)}
+	repo.mutex.Lock()
+	data, found := repo.cache.Get(key.key)
+	repo.mutex.Unlock()
 	if !found {
+		ctx, cancel := infrastructure.NewMySQLContext()
+		defer cancel()
+
 		query := "SELECT * FROM todos WHERE todo_id=?"
-		rows, err := repo.db.QueryContext(ctx, query, id)
+		stmt, err := repo.db.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		defer stmt.Close()
+
+		rows, err := stmt.QueryContext(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +154,9 @@ func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (todo *entity.Todo, err er
 			if err != nil {
 				return nil, err
 			}
-			repo.cache.SetDefault(fmt.Sprintf("todoId-%v", id), t)
+			repo.mutex.Lock()
+			repo.cache.SetDefault(key.key, t)
+			repo.mutex.Unlock()
 			return t, nil
 		}
 		return nil, fmt.Errorf("Todo with ID %v Not Found", id)
@@ -128,41 +164,51 @@ func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (todo *entity.Todo, err er
 	return data.(*entity.Todo), nil
 }
 
-func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) (todos []*entity.Todo, err error) {
+func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) ([]*entity.Todo, error) {
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	var rows *sql.Rows
+	key := cacheKey{"alltodo-" + strconv.FormatInt(activityGroupID, 10)}
 
-	data, found := repo.cache.Get(fmt.Sprintf("alltodo-%v", activityGroupID))
-	if !found {
-		query := "SELECT * FROM todos"
-		if activityGroupID != 0 {
-			query = fmt.Sprintf("%s %s '%d'", query, " where activity_group_id = ", activityGroupID)
-		}
+	repo.mutex.Lock()
+	data, found := repo.cache.Get(key.key)
+	repo.mutex.Unlock()
 
-		rows, err = repo.db.QueryContext(ctx, query)
+	if found {
+		return data.([]*entity.Todo), nil
+	}
+
+	query := "SELECT * FROM todos"
+	args := make([]interface{}, 0)
+	if activityGroupID != 0 {
+		query += " WHERE activity_group_id = ?"
+		args = append(args, activityGroupID)
+	}
+
+	rows, err := repo.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	todos := make([]*entity.Todo, 0)
+	for rows.Next() {
+		var t = new(entity.Todo)
+		err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var t = new(entity.Todo)
-			err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
-			if err != nil {
-				return nil, err
-			}
-			todos = append(todos, t)
-		}
-		repo.cache.SetDefault(fmt.Sprintf("alltodo-%v", activityGroupID), todos)
-		return todos, nil
+		todos = append(todos, t)
 	}
 
-	return data.([]*entity.Todo), nil
+	repo.mutex.Lock()
+	repo.cache.SetDefault(key.key, todos)
+	repo.mutex.Unlock()
+
+	return todos, nil
 }
 
-func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, error) {
+func (repo *TodoRepositoryImpl) UpdateTodo(todo *entity.Todo) error {
 	go func() {
 		repo.cache.Flush()
 	}()
@@ -170,26 +216,45 @@ func (repo *TodoRepositoryImpl) UpdateTodo(todo entity.Todo) (*entity.Todo, erro
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "UPDATE todos SET title=?, priority=?, is_active=? WHERE todo_id=?"
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	query := "UPDATE todos SET title=?, priority=?, is_active=?, updated_at=? WHERE todo_id=?"
+
+	// prepare the statement
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+
 	args := []interface{}{
 		todo.Title,
 		todo.Priority,
 		todo.IsActive,
+		todo.UpdatedAt,
 		todo.ID,
 	}
-	_, err := repo.db.ExecContext(ctx, query, args...)
+
+	_, err = stmt.ExecContext(ctx, args...)
 	if err != nil {
-		return nil, err
+		tx.Rollback()
+		return err
 	}
 
-	t, err := repo.GetTodoByID(todo.ID)
+	err = tx.Commit()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return t, nil
+
+	return nil
 }
 
 func (repo *TodoRepositoryImpl) DeleteTodo(id int64, title string) error {
+	// Flush the cache asynchronously
 	go func() {
 		repo.cache.Flush()
 	}()
@@ -197,17 +262,35 @@ func (repo *TodoRepositoryImpl) DeleteTodo(id int64, title string) error {
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	query := "DELETE FROM todos WHERE todo_id=? AND title=?"
-	args := []interface{}{
-		id,
-		title,
-	}
-	result, err := repo.db.ExecContext(ctx, query, args...)
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return fmt.Errorf("Todo with ID %v and Title: %v Not Found", id, title)
-	}
+	// Begin a transaction
+	tx, err := repo.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+
+	// Prepare the delete statement
+	stmt, err := tx.PrepareContext(ctx, "DELETE FROM todos WHERE todo_id=? AND title=?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	// Execute the delete statement
+	result, err := stmt.ExecContext(ctx, id, title)
+	if err != nil {
+		return err
+	}
+
+	// Check the number of affected rows
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return fmt.Errorf("Todo with ID %v and Title: %v Not Found", id, title)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	return nil
 }

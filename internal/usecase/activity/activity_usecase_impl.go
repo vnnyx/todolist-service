@@ -24,7 +24,7 @@ func (uc *ActivityUCImpl) InjectActivityRepository(activityRepository activity.A
 	return nil
 }
 
-func (uc *ActivityUCImpl) CreateActivity(ctx context.Context, req web.ActivityCreateRequest) (*web.ActivityDTO, error) {
+func (uc *ActivityUCImpl) CreateActivity(ctx context.Context, req *web.ActivityCreateRequest) (*web.ActivityDTO, error) {
 	if req.Title == "" {
 		return nil, model.ErrTitleCannotBeNull
 	}
@@ -32,15 +32,17 @@ func (uc *ActivityUCImpl) CreateActivity(ctx context.Context, req web.ActivityCr
 	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
-	got, err := uc.activityRepository.InsertActivity(entity.Activity{
+	activity := &entity.Activity{
 		Title: req.Title,
 		Email: req.Email,
-	})
+	}
+
+	err := uc.activityRepository.InsertActivity(activity)
 	if err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
-	return got.ToDTO(), nil
+	return activity.ToDTO(), nil
 }
 
 func (uc *ActivityUCImpl) GetActivityByID(ctx context.Context, id int64) (*web.ActivityDTO, error) {
@@ -67,7 +69,7 @@ func (uc *ActivityUCImpl) GetAllActivity(ctx context.Context) ([]*web.ActivityDT
 	return res, nil
 }
 
-func (uc *ActivityUCImpl) UpdateActivity(ctx context.Context, req web.ActivityUpdateRequest) (*web.ActivityDTO, error) {
+func (uc *ActivityUCImpl) UpdateActivity(ctx context.Context, req *web.ActivityUpdateRequest) (*web.ActivityDTO, error) {
 	activity, err := uc.activityRepository.GetActivityByID(req.ID)
 	if err != nil {
 		logrus.Error(err)
@@ -76,13 +78,13 @@ func (uc *ActivityUCImpl) UpdateActivity(ctx context.Context, req web.ActivityUp
 
 	activity.Title = req.Title
 
-	got, err := uc.activityRepository.UpdateActivity(*activity)
+	err = uc.activityRepository.UpdateActivity(activity)
 	if err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
 
-	return got.ToDTO(), nil
+	return activity.ToDTO(), nil
 }
 
 func (uc *ActivityUCImpl) DeleteActivity(ctx context.Context, id int64) error {

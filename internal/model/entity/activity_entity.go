@@ -18,7 +18,7 @@ type Activity struct {
 	UpdatedAt time.Time
 }
 
-func (a Activity) ToDTO() *web.ActivityDTO {
+func (a *Activity) ToDTO() *web.ActivityDTO {
 	return &web.ActivityDTO{
 		ID:        a.ID,
 		Title:     a.Title,

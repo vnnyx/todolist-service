@@ -1,6 +1,7 @@
 package todo
 
 import (
+	"context"
 	"database/sql"
 
 	"github.com/hashicorp/go-memdb"
@@ -9,12 +10,12 @@ import (
 )
 
 type TodoRepository interface {
-	InsertTodo(todo entity.Todo) (*entity.Todo, error)
+	InsertTodo(todo *entity.Todo) error
 	GetTodoByID(id int64) (todo *entity.Todo, err error)
 	GetAllTodo(activityGroupID int64) (todos []*entity.Todo, err error)
-	UpdateTodo(todo entity.Todo) (*entity.Todo, error)
+	UpdateTodo(todo *entity.Todo) error
 	DeleteTodo(id int64, title string) error
-	Worker()
+	Worker(ctx context.Context)
 
 	//dependency injection
 	InjectDB(db *sql.DB) error

@@ -20,7 +20,7 @@ type Todo struct {
 	UpdatedAt       time.Time
 }
 
-func (t Todo) ToDTO() *web.TodoDTO {
+func (t *Todo) ToDTO() *web.TodoDTO {
 	return &web.TodoDTO{
 		ID:              t.ID,
 		Title:           t.Title,

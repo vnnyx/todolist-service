@@ -23,7 +23,7 @@ func (uc *TodoUCImpl) InjectTodoRepository(todoRepository todo.TodoRepository) e
 	return nil
 }
 
-func (uc *TodoUCImpl) CreateTodo(ctx context.Context, req web.TodoCreateRequest) (*web.TodoDTO, error) {
+func (uc *TodoUCImpl) CreateTodo(ctx context.Context, req *web.TodoCreateRequest) (*web.TodoDTO, error) {
 	if req.ActivityGroupID == 0 {
 		return nil, model.ErrActivityGroupIDCannotBeNull
 	}
@@ -34,18 +34,20 @@ func (uc *TodoUCImpl) CreateTodo(ctx context.Context, req web.TodoCreateRequest)
 	if req.IsActive != nil {
 		isActive = *req.IsActive
 	}
-	got, err := uc.todoRepository.InsertTodo(entity.Todo{
+
+	todo := &entity.Todo{
 		ActivityGroupID: req.ActivityGroupID,
 		Title:           req.Title,
 		Priority:        "very-high",
 		IsActive:        isActive,
-	})
+	}
+	err := uc.todoRepository.InsertTodo(todo)
 	if err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
 
-	return got.ToDTO(), nil
+	return todo.ToDTO(), nil
 }
 
 func (uc *TodoUCImpl) GetTodoByID(ctx context.Context, id int64) (*web.TodoDTO, error) {
@@ -73,7 +75,7 @@ func (uc *TodoUCImpl) GetAllTodo(ctx context.Context, activityGroupID int64) ([]
 	return res, nil
 }
 
-func (uc *TodoUCImpl) UpdateTodo(ctx context.Context, req web.TodoUpdateRequest) (*web.TodoDTO, error) {
+func (uc *TodoUCImpl) UpdateTodo(ctx context.Context, req *web.TodoUpdateRequest) (*web.TodoDTO, error) {
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive
@@ -91,13 +93,13 @@ func (uc *TodoUCImpl) UpdateTodo(ctx context.Context, req web.TodoUpdateRequest)
 		todo.Priority = req.Priority
 	}
 
-	got, err := uc.todoRepository.UpdateTodo(*todo)
+	err = uc.todoRepository.UpdateTodo(todo)
 	if err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
 
-	return got.ToDTO(), nil
+	return todo.ToDTO(), nil
 }
 
 func (uc *TodoUCImpl) DeleteTodo(ctx context.Context, id int64) error {

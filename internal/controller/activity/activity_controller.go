@@ -2,6 +2,7 @@ package activity
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/patrickmn/go-cache"
 	"github.com/vnnyx/golang-todo-api/internal/usecase/activity"
 )
 
@@ -14,4 +15,5 @@ type ActivityController interface {
 
 	//dependency injection
 	InjectActivityUC(activityUC activity.ActivityUC) error
+	InjectCache(cache *cache.Cache) error
 }

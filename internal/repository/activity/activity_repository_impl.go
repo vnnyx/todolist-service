@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-memdb"
@@ -16,13 +18,19 @@ import (
 type ActivityRepositoryImpl struct {
 	db             *sql.DB
 	cache          *cache.Cache
-	workerActivity chan entity.Activity
+	workerActivity chan *entity.Activity
 	memdb          *memdb.MemDB
+	mutex          sync.Mutex
+}
+
+type cacheKey struct {
+	key string
 }
 
 func NewActivityRepository() ActivityRepository {
 	return &ActivityRepositoryImpl{
-		workerActivity: make(chan entity.Activity),
+		workerActivity: make(chan *entity.Activity),
+		mutex:          sync.Mutex{},
 	}
 }
 
@@ -41,27 +49,59 @@ func (repo *ActivityRepositoryImpl) InjectMemDB(memdb *memdb.MemDB) error {
 	return nil
 }
 
-func (repo *ActivityRepositoryImpl) Worker() {
+func (repo *ActivityRepositoryImpl) Worker(ctx context.Context) {
 	for {
-		activity := <-repo.workerActivity
 		query := "INSERT INTO activities(activity_id, title, email, created_at, updated_at) VALUES(?,?,?,?,?)"
+		select {
+		case <-ctx.Done():
+			return // exit if the context is cancelled
+		case activity := <-repo.workerActivity:
+			tx, err := repo.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+			if err != nil {
+				log.Fatalf("error starting transaction: %v", err)
+			}
 
-		args := []interface{}{
-			activity.ID,
-			activity.Title,
-			activity.Email,
-			activity.CreatedAt,
-			activity.UpdatedAt,
-		}
+			args := []interface{}{
+				activity.ID,
+				activity.Title,
+				activity.Email,
+				activity.CreatedAt,
+				activity.UpdatedAt,
+			}
 
-		_, err := repo.db.ExecContext(context.Background(), query, args...)
-		if err != nil {
-			log.Printf("Error inserting activity %d to database: %v\n", activity.ID, err)
+			// Use a context with timeout for the insert operation
+			insertCtx, insertCancel := context.WithTimeout(ctx, time.Second*10)
+			defer insertCancel()
+
+			stmt, err := tx.PrepareContext(ctx, query)
+			if err != nil {
+				// rollback the transaction if an error occurs
+				tx.Rollback()
+				return
+			}
+			defer stmt.Close()
+
+			_, err = stmt.ExecContext(insertCtx, args...)
+			if err != nil {
+				// rollback the transaction if an error occurs
+				tx.Rollback()
+				return
+			}
+			tx.Commit()
+
+			// insert the activity into the memdb
+			txn := repo.memdb.Txn(true)
+			defer txn.Abort()
+			err = txn.Insert("activities", activity)
+			if err != nil {
+				return
+			}
+			txn.Commit()
 		}
 	}
 }
 
-func (repo *ActivityRepositoryImpl) InsertActivity(activity entity.Activity) (*entity.Activity, error) {
+func (repo *ActivityRepositoryImpl) InsertActivity(activity *entity.Activity) error {
 	go func() {
 		repo.cache.Flush()
 	}()
@@ -71,35 +111,36 @@ func (repo *ActivityRepositoryImpl) InsertActivity(activity entity.Activity) (*e
 	activity.ID = entity.ActivitySeq
 	entity.ActivitySeq++
 
-	query := "INSERT INTO activities(activity_id, title, email, created_at, updated_at) VALUES(?,?,?,?,?)"
-	args := []interface{}{
-		activity.ID,
-		activity.Title,
-		activity.Email,
-		activity.CreatedAt,
-		activity.UpdatedAt,
-	}
+	wg := sync.WaitGroup{}
 
-	_, err := repo.db.ExecContext(context.Background(), query, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	go func(activity entity.Activity) {
+	wg.Add(1)
+	go func(activity *entity.Activity) {
 		repo.workerActivity <- activity
+		wg.Done()
 	}(activity)
 
-	return &activity, nil
+	wg.Wait()
+
+	return nil
 }
 
 func (repo *ActivityRepositoryImpl) GetActivityByID(id int64) (activity *entity.Activity, err error) {
-	ctx, cancel := infrastructure.NewMySQLContext()
-	defer cancel()
-
-	data, found := repo.cache.Get(fmt.Sprintf("activityId-%v", id))
+	key := cacheKey{"activityId-" + strconv.FormatInt(id, 10)}
+	repo.mutex.Lock()
+	data, found := repo.cache.Get(key.key)
+	repo.mutex.Unlock()
 	if !found {
+		ctx, cancel := infrastructure.NewMySQLContext()
+		defer cancel()
+
 		query := "SELECT * FROM activities WHERE activity_id=?"
-		rows, err := repo.db.QueryContext(ctx, query, id)
+		stmt, err := repo.db.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		defer stmt.Close()
+
+		rows, err := stmt.QueryContext(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -107,47 +148,64 @@ func (repo *ActivityRepositoryImpl) GetActivityByID(id int64) (activity *entity.
 
 		if rows.Next() {
 			var a = new(entity.Activity)
-			err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
+			err := rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
 			if err != nil {
 				return nil, err
 			}
-			repo.cache.SetDefault(fmt.Sprintf("activityId-%v", id), a)
+			repo.mutex.Lock()
+			repo.cache.SetDefault(key.key, a)
+			repo.mutex.Unlock()
 			return a, nil
 		}
 		return nil, fmt.Errorf("Activity with ID %v Not Found", id)
 	}
-
 	return data.(*entity.Activity), nil
 }
 
 func (repo *ActivityRepositoryImpl) GetAllActivity() (activities []*entity.Activity, err error) {
+	// Check the cache first
+	data, found := repo.cache.Get("allactivity")
+	if found {
+		return data.([]*entity.Activity), nil
+	}
+
+	// Acquire a mutex to ensure only one goroutine executes the database query
+	repo.mutex.Lock()
+	defer repo.mutex.Unlock()
+
+	// Check the cache again to make sure that another goroutine hasn't already executed the database query
+	data, found = repo.cache.Get("allactivity")
+	if found {
+		return data.([]*entity.Activity), nil
+	}
+
+	// If the data is not found in the cache, execute the database query
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	data, found := repo.cache.Get("allactivity")
-	if !found {
-		query := "SELECT * FROM activities"
-		rows, err := repo.db.QueryContext(ctx, query)
+	query := "SELECT * FROM activities"
+	rows, err := repo.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var a = new(entity.Activity)
+		err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var a = new(entity.Activity)
-			err = rows.Scan(&a.ID, &a.Title, &a.Email, &a.CreatedAt, &a.UpdatedAt)
-			if err != nil {
-				return nil, err
-			}
-			activities = append(activities, a)
-		}
-		repo.cache.SetDefault("allactivity", activities)
-		return activities, nil
+		activities = append(activities, a)
 	}
-	return data.([]*entity.Activity), nil
+
+	// Update the cache with the data
+	repo.cache.SetDefault("allactivity", activities)
+
+	return activities, nil
 }
 
-func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*entity.Activity, error) {
+func (repo *ActivityRepositoryImpl) UpdateActivity(activity *entity.Activity) error {
 	go func() {
 		repo.cache.Flush()
 	}()
@@ -156,21 +214,21 @@ func (repo *ActivityRepositoryImpl) UpdateActivity(activity entity.Activity) (*e
 	defer cancel()
 
 	query := "UPDATE activities SET title=? WHERE activity_id=?"
-	args := []interface{}{
-		activity.Title,
-		activity.ID,
-	}
-	_, err := repo.db.ExecContext(ctx, query, args...)
+
+	// Prepare the SQL statement
+	stmt, err := repo.db.PrepareContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	defer stmt.Close()
+
+	// Execute the prepared statement with the given parameters
+	_, err = stmt.ExecContext(ctx, activity.Title, activity.ID)
+	if err != nil {
+		return err
 	}
 
-	a, err := repo.GetActivityByID(activity.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	return a, nil
+	return nil
 }
 
 func (repo *ActivityRepositoryImpl) DeleteActivity(id int64) error {
@@ -182,9 +240,19 @@ func (repo *ActivityRepositoryImpl) DeleteActivity(id int64) error {
 	defer cancel()
 
 	query := "DELETE FROM activities WHERE activity_id=?"
-	_, err := repo.db.ExecContext(ctx, query, id)
+
+	// Prepare the SQL statement
+	stmt, err := repo.db.PrepareContext(ctx, query)
 	if err != nil {
 		return err
 	}
+	defer stmt.Close()
+
+	// Execute the prepared statement with the given parameter
+	_, err = stmt.ExecContext(ctx, id)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

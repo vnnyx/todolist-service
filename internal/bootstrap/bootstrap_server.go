@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -20,8 +21,10 @@ import (
 	todoUC "github.com/vnnyx/golang-todo-api/internal/usecase/todo"
 )
 
-func StarServer() {
+func StartServer() {
 	RunMigration()
+
+	// Set up the server and inject dependencies
 	app := fiber.New(fiber.Config{
 		ErrorHandler: exception.ErrorHandler,
 		JSONEncoder:  json.Marshal,
@@ -36,51 +39,65 @@ func StarServer() {
 	memdb := infrastructure.NewMemDB()
 
 	activityRepo := activity.NewActivityRepository()
-	err := activityRepo.InjectDB(mysqlDB)
-	continueOrFatal(err)
-	err = activityRepo.InjectCache(cache)
-	continueOrFatal(err)
-	err = activityRepo.InjectMemDB(memdb)
-	continueOrFatal(err)
+	if err := activityRepo.InjectDB(mysqlDB); err != nil {
+		log.Fatalf("failed to inject DB into ActivityRepository: %v", err)
+	}
+	if err := activityRepo.InjectCache(cache); err != nil {
+		log.Fatalf("failed to inject Cache into ActivityRepository: %v", err)
+	}
+	if err := activityRepo.InjectMemDB(memdb); err != nil {
+		log.Fatalf("failed to inject MemDB into ActivityRepository: %v", err)
+	}
 
 	activityUC := activityUC.NewActivityUC()
-	err = activityUC.InjectActivityRepository(activityRepo)
-	continueOrFatal(err)
+	if err := activityUC.InjectActivityRepository(activityRepo); err != nil {
+		log.Fatalf("failed to inject ActivityRepository into ActivityUC: %v", err)
+	}
 
 	activityController := activityController.NewActivityController()
-	err = activityController.InjectActivityUC(activityUC)
-	continueOrFatal(err)
+	if err := activityController.InjectActivityUC(activityUC); err != nil {
+		log.Fatalf("failed to inject ActivityUC into ActivityController: %v", err)
+	}
+	if err := activityController.InjectCache(cache); err != nil {
+		log.Fatalf("failed to inject InjectCache into ActivityController: %v", err)
+	}
 
 	todoRepo := todo.NewTodoRepository()
-	err = todoRepo.InjectDB(mysqlDB)
-	continueOrFatal(err)
-	err = todoRepo.InjectCache(cache)
-	continueOrFatal(err)
-	err = todoRepo.InjectMemDB(memdb)
-	continueOrFatal(err)
+	if err := todoRepo.InjectDB(mysqlDB); err != nil {
+		log.Fatalf("failed to inject DB into TodoRepository: %v", err)
+	}
+	if err := todoRepo.InjectCache(cache); err != nil {
+		log.Fatalf("failed to inject Cache into TodoRepository: %v", err)
+	}
+	if err := todoRepo.InjectMemDB(memdb); err != nil {
+		log.Fatalf("failed to inject MemDB into TodoRepository: %v", err)
+	}
 
 	todoUC := todoUC.NewTodoUC()
-	err = todoUC.InjectTodoRepository(todoRepo)
-	continueOrFatal(err)
+	if err := todoUC.InjectTodoRepository(todoRepo); err != nil {
+		log.Fatalf("failed to inject TodoRepository into TodoUC: %v", err)
+	}
 
 	todoController := todoController.NewTodoController()
-	err = todoController.InjectTodoUC(todoUC)
-	continueOrFatal(err)
+	if err := todoController.InjectTodoUC(todoUC); err != nil {
+		log.Fatalf("failed to inject TodoUC into TodoController: %v", err)
+	}
+	if err := todoController.InjectCache(cache); err != nil {
+		log.Fatalf("failed to inject InjectCache into TodoController: %v", err)
+	}
 
-	go activityRepo.Worker()
-	go todoRepo.Worker()
+	// Start the workers for both repositories
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go activityRepo.Worker(ctx)
+	go todoRepo.Worker(ctx)
 
+	// Set up routes and start listening for requests
 	r := routes.NewRoute(activityController, todoController, app)
 	r.InitRoute()
 
-	err = app.Listen(":3030")
+	err := app.Listen(":3030")
 	if err != nil {
 		log.Fatalf("couldn't start server: %v", err)
-	}
-}
-
-func continueOrFatal(err error) {
-	if err != nil {
-		log.Fatal(err)
 	}
 }
