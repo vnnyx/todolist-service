@@ -19,7 +19,7 @@ func NewMemDB() *memdb.MemDB {
 					},
 					"activity_group_id": {
 						Name:    "activity_group_id",
-						Unique:  true,
+						Unique:  false,
 						Indexer: &memdb.IntFieldIndex{Field: "ActivityGroupID"},
 					},
 				},

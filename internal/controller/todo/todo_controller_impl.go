@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/patrickmn/go-cache"
@@ -14,12 +15,13 @@ import (
 type TodoControllerImpl struct {
 	todoUC todo.TodoUC
 	cache  *cache.Cache
-	mutex  sync.Mutex
+	mutex  sync.RWMutex
 }
 
 func NewTodoController() TodoController {
 	return &TodoControllerImpl{
-		mutex: sync.Mutex{},
+		mutex: sync.RWMutex{},
+		cache: cache.New(5*time.Minute, 10*time.Minute),
 	}
 }
 

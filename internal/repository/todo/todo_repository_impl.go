@@ -20,7 +20,7 @@ type TodoRepositoryImpl struct {
 	cache      *cache.Cache
 	workerTodo chan *entity.Todo
 	memdb      *memdb.MemDB
-	mutex      sync.Mutex
+	mutex      sync.RWMutex
 }
 
 type cacheKey struct {
@@ -30,7 +30,7 @@ type cacheKey struct {
 func NewTodoRepository() TodoRepository {
 	return &TodoRepositoryImpl{
 		workerTodo: make(chan *entity.Todo),
-		mutex:      sync.Mutex{},
+		mutex:      sync.RWMutex{},
 	}
 }
 
@@ -99,15 +99,14 @@ func (repo *TodoRepositoryImpl) Worker(ctx context.Context) {
 				return
 			}
 			txn.Commit()
+
+			// clear the cache after inserting
+			repo.cache.Flush()
 		}
 	}
 }
 
 func (repo *TodoRepositoryImpl) InsertTodo(todo *entity.Todo) error {
-	go func() {
-		repo.cache.Flush()
-	}()
-
 	todo.CreatedAt = time.Now()
 	todo.UpdatedAt = time.Now()
 	todo.ID = entity.TodoSeq
@@ -126,81 +125,115 @@ func (repo *TodoRepositoryImpl) InsertTodo(todo *entity.Todo) error {
 	return nil
 }
 
-func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (todo *entity.Todo, err error) {
-	key := cacheKey{"todoId-" + strconv.FormatInt(id, 10)}
+func (repo *TodoRepositoryImpl) GetTodoByID(id int64) (*entity.Todo, error) {
+	// Create a cache key for this todo ID
+	key := "todoId-" + strconv.FormatInt(id, 10)
+
+	// Try to retrieve the todo from the cache
 	repo.mutex.Lock()
-	data, found := repo.cache.Get(key.key)
+	data, found := repo.cache.Get(key)
 	repo.mutex.Unlock()
-	if !found {
-		ctx, cancel := infrastructure.NewMySQLContext()
-		defer cancel()
-
-		query := "SELECT * FROM todos WHERE todo_id=?"
-		stmt, err := repo.db.PrepareContext(ctx, query)
-		if err != nil {
-			return nil, err
-		}
-		defer stmt.Close()
-
-		rows, err := stmt.QueryContext(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-
-		if rows.Next() {
-			var t = new(entity.Todo)
-			err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
-			if err != nil {
-				return nil, err
-			}
-			repo.mutex.Lock()
-			repo.cache.SetDefault(key.key, t)
-			repo.mutex.Unlock()
-			return t, nil
-		}
-		return nil, fmt.Errorf("Todo with ID %v Not Found", id)
+	if found {
+		return data.(*entity.Todo), nil
 	}
-	return data.(*entity.Todo), nil
-}
 
-func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) ([]*entity.Todo, error) {
+	// Try to retrieve the todo from the memdb
+	if todo, err := repo.getTodoByIDFromMemDB(id); err == nil {
+		// If the todo was found in memdb, add it to the cache and return it
+		repo.mutex.Lock()
+		repo.cache.SetDefault(key, todo)
+		repo.mutex.Unlock()
+		return todo, nil
+	}
+
+	// If the todo wasn't found in the memdb, retrieve it from the database
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	key := cacheKey{"alltodo-" + strconv.FormatInt(activityGroupID, 10)}
+	query := "SELECT * FROM todos WHERE todo_id=?"
+	stmt, err := repo.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
 
+	row := stmt.QueryRowContext(ctx, id)
+
+	var todo entity.Todo
+	err = row.Scan(&todo.ID, &todo.ActivityGroupID, &todo.Title, &todo.IsActive, &todo.Priority, &todo.CreatedAt, &todo.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("Todo with ID %v Not Found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Add the todo to the cache and return it
+	repo.mutex.Lock()
+	repo.cache.SetDefault(key, &todo)
+	repo.mutex.Unlock()
+	return &todo, nil
+}
+
+func (repo *TodoRepositoryImpl) GetAllTodo(activityGroupID int64) ([]*entity.Todo, error) {
+	// Check cache first
+	key := cacheKey{"alltodo-" + strconv.FormatInt(activityGroupID, 10)}
 	repo.mutex.Lock()
 	data, found := repo.cache.Get(key.key)
 	repo.mutex.Unlock()
-
 	if found {
 		return data.([]*entity.Todo), nil
 	}
 
-	query := "SELECT * FROM todos"
-	args := make([]interface{}, 0)
-	if activityGroupID != 0 {
-		query += " WHERE activity_group_id = ?"
-		args = append(args, activityGroupID)
+	// If not found in cache, query memdb
+	todos := make([]*entity.Todo, 0)
+	txn := repo.memdb.Txn(false)
+	defer txn.Abort()
+	var it memdb.ResultIterator
+	if activityGroupID == 0 {
+		it, _ = txn.Get("todos", "id")
+	} else {
+		it, _ = txn.Get("todos", "activity_group_id", activityGroupID)
+	}
+	for obj := it.Next(); obj != nil; obj = it.Next() {
+		todo := obj.(*entity.Todo)
+		todos = append(todos, todo)
 	}
 
-	rows, err := repo.db.QueryContext(ctx, query, args...)
+	// If found in memdb, update cache and return
+	if len(todos) > 0 {
+		repo.mutex.Lock()
+		repo.cache.SetDefault(key.key, todos)
+		repo.mutex.Unlock()
+		return todos, nil
+	}
+
+	// If not found in memdb, query MySQL
+	ctx, cancel := infrastructure.NewMySQLContext()
+	defer cancel()
+	rows, err := repo.db.QueryContext(ctx, "SELECT * FROM todos WHERE activity_group_id = ?", activityGroupID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	todos := make([]*entity.Todo, 0)
 	for rows.Next() {
-		var t = new(entity.Todo)
-		err := rows.Scan(&t.ID, &t.ActivityGroupID, &t.Title, &t.IsActive, &t.Priority, &t.CreatedAt, &t.UpdatedAt)
+		todo := new(entity.Todo)
+		err := rows.Scan(&todo.ID, &todo.ActivityGroupID, &todo.Title, &todo.IsActive, &todo.Priority, &todo.CreatedAt, &todo.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
-		todos = append(todos, t)
+		todos = append(todos, todo)
 	}
 
+	// Update memdb and cache with MySQL results
+	txn = repo.memdb.Txn(true)
+	defer txn.Abort()
+	for _, todo := range todos {
+		err := txn.Insert("todos", todo)
+		if err != nil {
+			return nil, err
+		}
+	}
 	repo.mutex.Lock()
 	repo.cache.SetDefault(key.key, todos)
 	repo.mutex.Unlock()
@@ -216,20 +249,16 @@ func (repo *TodoRepositoryImpl) UpdateTodo(todo *entity.Todo) error {
 	ctx, cancel := infrastructure.NewMySQLContext()
 	defer cancel()
 
-	tx, err := repo.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
 	query := "UPDATE todos SET title=?, priority=?, is_active=?, updated_at=? WHERE todo_id=?"
 
-	// prepare the statement
-	stmt, err := tx.PrepareContext(ctx, query)
+	// Prepare the SQL statement
+	stmt, err := repo.db.PrepareContext(ctx, query)
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 	defer stmt.Close()
+
+	todo.UpdatedAt = time.Now()
 
 	args := []interface{}{
 		todo.Title,
@@ -241,14 +270,40 @@ func (repo *TodoRepositoryImpl) UpdateTodo(todo *entity.Todo) error {
 
 	_, err = stmt.ExecContext(ctx, args...)
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
-	err = tx.Commit()
+	// Update the memdb
+	txn := repo.memdb.Txn(true)
+	defer txn.Abort()
+
+	// Get the todo from memdb
+	oldTodo, err := repo.getTodoByIDFromMemDB(todo.ID)
 	if err != nil {
 		return err
 	}
+
+	// Update the fields that have changed
+	if oldTodo.Title != todo.Title {
+		oldTodo.Title = todo.Title
+	}
+	if oldTodo.Priority != todo.Priority {
+		oldTodo.Priority = todo.Priority
+	}
+	if oldTodo.IsActive != todo.IsActive {
+		oldTodo.IsActive = todo.IsActive
+	}
+	if oldTodo.UpdatedAt != todo.UpdatedAt {
+		oldTodo.UpdatedAt = todo.UpdatedAt
+	}
+
+	// Update the todo in memdb
+	err = txn.Insert("todos", oldTodo)
+	if err != nil {
+		return err
+	}
+
+	txn.Commit()
 
 	return nil
 }
@@ -292,5 +347,29 @@ func (repo *TodoRepositoryImpl) DeleteTodo(id int64, title string) error {
 		return err
 	}
 
+	// Delete the todo in memdb
+	txn := repo.memdb.Txn(true)
+	defer txn.Abort()
+	err = txn.Delete("todos", entity.Todo{ID: id})
+	if err != nil {
+		return err
+	}
+	txn.Commit()
+
 	return nil
+}
+
+func (repo *TodoRepositoryImpl) getTodoByIDFromMemDB(todoID int64) (*entity.Todo, error) {
+	txn := repo.memdb.Txn(false)
+	defer txn.Abort()
+
+	got, err := txn.First("todos", "id", todoID)
+	if err != nil {
+		return nil, err
+	}
+	if got == nil {
+		return nil, fmt.Errorf("todo with ID %d not found in memdb", todoID)
+	}
+
+	return got.(*entity.Todo), nil
 }

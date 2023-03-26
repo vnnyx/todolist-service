@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/patrickmn/go-cache"
@@ -14,11 +15,14 @@ import (
 type ActivityControllerImpl struct {
 	activityUC activity.ActivityUC
 	cache      *cache.Cache
-	mutex      sync.Mutex
+	mutex      sync.RWMutex
 }
 
 func NewActivityController() ActivityController {
-	return &ActivityControllerImpl{}
+	return &ActivityControllerImpl{
+		mutex: sync.RWMutex{},
+		cache: cache.New(5*time.Minute, 10*time.Minute),
+	}
 }
 
 func (controller *ActivityControllerImpl) InjectActivityUC(activityUC activity.ActivityUC) error {
