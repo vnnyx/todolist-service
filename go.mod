@@ -7,7 +7,6 @@ require (
 	github.com/goccy/go-json v0.10.2
 	github.com/gofiber/fiber/v2 v2.42.0
 	github.com/golang-migrate/migrate/v4 v4.15.2
-	github.com/google/wire v0.5.0
 	github.com/hashicorp/go-memdb v1.3.4
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/sirupsen/logrus v1.9.0
